@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J.A.R.V.I.S.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cyan: #3ce8ff;
+    --cyan-dim: rgba(60, 232, 255, .35);
+    --cyan-faint: rgba(60, 232, 255, .08);
+    --gold: #ffb53c;
+    --red: #ff4d5e;
+    --green: #4dffa6;
+    --bg: #02070c;
+    --panel: rgba(4, 22, 32, .55);
+    --text: #cdf6ff;
+    --muted: #5d8b99;
+    --accent: var(--cyan);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at center, #062030 0%, var(--bg) 70%);
+    color: var(--text);
+    font-family: Rajdhani, system-ui, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  body[data-state="thinking"], body[data-state="working"] { --accent: var(--gold); }
+  body[data-state="listening"] { --accent: var(--green); }
+  body[data-state="boot"] { --accent: var(--muted); }
+
+  /* grille hexagonale + scanlines */
+  .bg-grid, .scan { position: fixed; inset: 0; pointer-events: none; }
+  .bg-grid {
+    opacity: .5;
+    background-image:
+      linear-gradient(var(--cyan-faint) 1px, transparent 1px),
+      linear-gradient(90deg, var(--cyan-faint) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+  }
+  .scan {
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply;
+  }
+  .scan::after {
+    content: ""; position: absolute; left: 0; right: 0; height: 120px;
+    background: linear-gradient(transparent, rgba(60,232,255,.05), transparent);
+    animation: sweep 7s linear infinite;
+  }
+  @keyframes sweep { from { top: -120px; } to { top: 100%; } }
+
+  .hud {
+    position: relative; height: 100%;
+    display: grid;
+    grid-template-columns: 300px 1fr 340px;
+    grid-template-rows: 64px 1fr 230px;
+    gap: 14px; padding: 16px;
+  }
+
+  /* barre du haut */
+  header {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--cyan-dim);
+    padding: 0 6px;
+  }
+  .brand { font-family: Orbitron; font-weight: 800; letter-spacing: .5em; font-size: 22px; color: var(--cyan);
+           text-shadow: 0 0 18px var(--cyan); }
+  .brand small { display: block; font-size: 9px; letter-spacing: .35em; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .clock { text-align: right; font-family: Orbitron; }
+  .clock .t { font-size: 26px; color: var(--cyan); letter-spacing: .12em; }
+  .clock .d { font-size: 10px; color: var(--muted); letter-spacing: .3em; text-transform: uppercase; }
+  .link { display: flex; align-items: center; gap: 8px; font-size: 12px; letter-spacing: .25em; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); }
+  .dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--cyan-dim);
+    position: relative; padding: 14px 16px; overflow: hidden;
+    clip-path: polygon(0 12px, 12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+    backdrop-filter: blur(4px);
+  }
+  .panel h2 {
+    font-family: Orbitron; font-size: 10px; font-weight: 600; letter-spacing: .35em;
+    color: var(--cyan); margin-bottom: 12px; display: flex; justify-content: space-between;
+  }
+  .panel h2 span { color: var(--muted); }
+
+  /* télémétrie */
+  .gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .gauge { text-align: center; }
+  .gauge svg { width: 100%; max-width: 110px; }
+  .gauge .v { font-family: Orbitron; font-size: 17px; fill: var(--text); }
+  .gauge .l { font-size: 9px; letter-spacing: .25em; fill: var(--muted); }
+  .rows { margin-top: 14px; font-size: 13px; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed rgba(60,232,255,.12); }
+  .row b { font-family: Orbitron; font-weight: 400; font-size: 12px; color: var(--cyan); }
+  .spark { width: 100%; height: 46px; margin-top: 10px; }
+
+  /* réacteur */
+  .core { position: relative; display: grid; place-items: center; }
+  #reactor { width: min(100%, 640px); aspect-ratio: 1; }
+  .state {
+    position: absolute; bottom: 4%; text-align: center;
+    font-family: Orbitron; letter-spacing: .5em; font-size: 13px; color: var(--accent);
+    text-shadow: 0 0 12px var(--accent); transition: color .4s;
+  }
+  .state small { display: block; margin-top: 6px; font-family: Rajdhani; letter-spacing: .2em; font-size: 12px; color: var(--muted); }
+
+  /* activité */
+  .feed { list-style: none; font-size: 13px; overflow-y: auto; height: calc(100% - 26px); scrollbar-width: none; }
+  .feed li { padding: 7px 0 7px 12px; border-left: 2px solid var(--cyan-dim); margin-bottom: 6px; animation: in .35s ease-out; }
+  .feed li .n { font-family: Orbitron; font-size: 10px; letter-spacing: .2em; color: var(--gold); }
+  .feed li .x { color: var(--text); opacity: .8; word-break: break-word; }
+  .feed li .ts { float: right; font-size: 10px; color: var(--muted); }
+  @keyframes in { from { opacity: 0; transform: translateX(14px); } }
+
+  /* transcription */
+  .console { grid-column: 1 / -1; display: grid; grid-template-rows: 1fr auto; }
+  .log { overflow-y: auto; font-size: 16px; line-height: 1.45; padding-right: 8px; scrollbar-width: thin; scrollbar-color: var(--cyan-dim) transparent; }
+  .msg { margin-bottom: 10px; animation: in .3s ease-out; user-select: text; }
+  .msg .who { font-family: Orbitron; font-size: 10px; letter-spacing: .3em; margin-right: 10px; }
+  .msg.user .who { color: var(--green); }
+  .msg.jarvis .who { color: var(--cyan); }
+  .msg.jarvis .body { white-space: pre-wrap; }
+  .msg .meta { font-size: 11px; color: var(--muted); margin-left: 8px; }
+  .caret::after { content: "▌"; color: var(--cyan); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .bar { display: flex; gap: 10px; margin-top: 10px; }
+  .bar input {
+    flex: 1; background: rgba(0,0,0,.35); border: 1px solid var(--cyan-dim); color: var(--text);
+    font: 500 16px Rajdhani; padding: 10px 14px; outline: none; letter-spacing: .03em;
+  }
+  .bar input:focus { border-color: var(--cyan); box-shadow: 0 0 16px rgba(60,232,255,.2) inset; }
+  .btn {
+    background: transparent; border: 1px solid var(--cyan-dim); color: var(--cyan);
+    font: 600 11px Orbitron; letter-spacing: .25em; padding: 0 16px; cursor: pointer; min-width: 52px;
+  }
+  .btn:hover { background: rgba(60,232,255,.1); border-color: var(--cyan); }
+  .btn.mic.live { color: var(--green); border-color: var(--green); box-shadow: 0 0 18px rgba(77,255,166,.35); }
+  .btn.off { color: var(--muted); }
+  .hint { font-size: 11px; color: var(--muted); letter-spacing: .15em; margin-top: 6px; }
+  kbd { font-family: Orbitron; font-size: 9px; border: 1px solid var(--cyan-dim); padding: 1px 5px; color: var(--cyan); }
+
+  @media (max-width: 1000px) {
+    .hud { grid-template-columns: 1fr; grid-template-rows: 64px 360px auto auto 260px; overflow-y: auto; height: auto; min-height: 100%; }
+    body { overflow: auto; }
+    header { grid-column: 1; }
+  }
+</style>
+</head>
+<body data-state="boot">
+<div class="bg-grid"></div>
+
+<div class="hud">
+  <header>
+    <div class="brand">J.A.R.V.I.S.<small>JUST A RATHER VERY INTELLIGENT SYSTEM</small></div>
+    <div class="link"><span class="dot" id="link"></span><span id="linktxt">CONNEXION…</span></div>
+    <div class="clock"><div class="t" id="time">--:--:--</div><div class="d" id="date"></div></div>
+  </header>
+
+  <section class="panel">
+    <h2>TÉLÉMÉTRIE <span id="model">—</span></h2>
+    <div class="gauges">
+      <div class="gauge" id="g-cpu"></div>
+      <div class="gauge" id="g-mem"></div>
+      <div class="gauge" id="g-disk"></div>
+      <div class="gauge" id="g-bat"></div>
+    </div>
+    <svg class="spark" id="spark" viewBox="0 0 260 46" preserveAspectRatio="none"></svg>
+    <div class="rows">
+      <div class="row">Réseau ↓ <b id="down">—</b></div>
+      <div class="row">Réseau ↑ <b id="up">—</b></div>
+      <div class="row">En ligne depuis <b id="uptime">—</b></div>
+      <div class="row">Requêtes traitées <b id="turns">0</b></div>
+      <div class="row">Dernière réponse <b id="last">—</b></div>
+    </div>
+  </section>
+
+  <section class="core">
+    <canvas id="reactor"></canvas>
+    <div class="state"><span id="stateTxt">INITIALISATION</span><small id="stateSub">Démarrage des systèmes</small></div>
+  </section>
+
+  <section class="panel">
+    <h2>ACTIVITÉ <span id="toolcount">0</span></h2>
+    <ul class="feed" id="feed"></ul>
+  </section>
+
+  <section class="panel console">
+    <div class="log" id="log"></div>
+    <div>
+      <div class="bar">
+        <button class="btn mic" id="mic" title="Parler (Espace)">MIC</button>
+        <input id="input" placeholder="Parle-moi ou écris ici…" autocomplete="off">
+        <button class="btn" id="voice" title="Voix on/off">VOIX</button>
+        <button class="btn" id="stop" title="Stop (Échap)">STOP</button>
+        <button class="btn" id="reset" title="Nouvelle conversation">RESET</button>
+      </div>
+      <div class="hint">Dis <kbd>HEY JARVIS</kbd> · <kbd>ESPACE</kbd> pour parler · <kbd>ÉCHAP</kbd> pour l'interrompre · <kbd>ENTRÉE</kbd> pour envoyer</div>
+    </div>
+  </section>
+</div>
+<div class="scan"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STATES = {
+  boot:         ["INITIALISATION", "Démarrage des systèmes"],
+  idle:         ["EN VEILLE", "Dis « Hey Jarvis »"],
+  listening:    ["J'ÉCOUTE", "Parle, je t'entends"],
+  transcribing: ["ANALYSE VOCALE", "Transcription en cours"],
+  thinking:     ["RÉFLEXION", "Traitement neuronal"],
+  working:      ["EXÉCUTION", "Intervention sur le système"],
+  speaking:     ["RÉPONSE", ""],
+};
+let state = "boot", level = 0, speaking = false, voiceOn = true, ws, toolCount = 0;
+let current = null;  // message Jarvis en cours d'écriture
+const cpuHist = [];
+
+/* ---------- réacteur ---------- */
+const cv = $("reactor"), ctx = cv.getContext("2d");
+function resize() {
+  const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+  cv.width = r.width * d; cv.height = r.height * d;
+}
+addEventListener("resize", resize);
+
+const particles = Array.from({ length: 90 }, () => ({ a: Math.random() * 6.283, r: .55 + Math.random() * .45, s: .001 + Math.random() * .004, z: Math.random() }));
+let t = 0, energy = 0, spin = 0;
+
+function accent() {
+  return { thinking: [255,181,60], working: [255,181,60], listening: [77,255,166], boot: [93,139,153] }[state] || [60,232,255];
+}
+
+function draw() {
+  t += 1 / 60;
+  const W = cv.width, H = cv.height, cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 * .92;
+  const [r, g, b] = accent();
+  const col = (a) => `rgba(${r},${g},${b},${a})`;
+
+  // énergie cible selon l'état
+  let target = .15;
+  if (state === "listening") target = .25 + level * 2.2;
+  if (state === "thinking" || state === "working" || state === "transcribing") target = .55 + .15 * Math.sin(t * 6);
+  if (speaking) target = .45 + .35 * Math.abs(Math.sin(t * 9) * Math.sin(t * 3.7));
+  energy += (Math.min(target, 1.2) - energy) * .15;
+  spin += (state === "thinking" || state === "working" ? .035 : .006) + energy * .01;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.save(); ctx.translate(cx, cy);
+
+  // halo
+  const halo = ctx.createRadialGradient(0, 0, R * .05, 0, 0, R);
+  halo.addColorStop(0, col(.35 + energy * .3)); halo.addColorStop(.35, col(.08)); halo.addColorStop(1, col(0));
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(0, 0, R, 0, 7); ctx.fill();
+
+  // anneau de graduations extérieur
+  ctx.save(); ctx.rotate(-spin * .3);
+  for (let i = 0; i < 120; i++) {
+    const a = i / 120 * Math.PI * 2, long = i % 10 === 0;
+    ctx.strokeStyle = col(long ? .8 : .3); ctx.lineWidth = long ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a) * R * .93, Math.sin(a) * R * .93);
+    ctx.lineTo(Math.cos(a) * R * (long ? .86 : .9), Math.sin(a) * R * (long ? .86 : .9)); ctx.stroke();
+  }
+  ctx.restore();
+
+  // arcs segmentés tournants
+  const arcs = [[.8, 4, .5, 1], [.72, 7, .25, -1.6], [.64, 3, .7, 2.3], [.56, 12, .12, -3]];
+  arcs.forEach(([rad, n, frac, sp], k) => {
+    ctx.save(); ctx.rotate(spin * sp);
+    ctx.strokeStyle = col(.55 + energy * .4); ctx.lineWidth = R * (k === 0 ? .025 : .012);
+    ctx.shadowBlur = 18 * (1 + energy); ctx.shadowColor = col(.9);
+    for (let i = 0; i < n; i++) {
+      const s = i / n * Math.PI * 2;
+      ctx.beginPath(); ctx.arc(0, 0, R * rad, s, s + Math.PI * 2 / n * frac); ctx.stroke();
+    }
+    ctx.restore();
+  });
+
+  // onde vocale circulaire
+  ctx.beginPath();
+  for (let i = 0; i <= 180; i++) {
+    const a = i / 180 * Math.PI * 2;
+    const wob = Math.sin(a * 6 + t * 5) * .5 + Math.sin(a * 11 - t * 7) * .3 + Math.sin(a * 17 + t * 3) * .2;
+    const rr = R * (.46 + wob * .06 * energy);
+    i ? ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  ctx.strokeStyle = col(.9); ctx.lineWidth = 2; ctx.shadowBlur = 25; ctx.shadowColor = col(1); ctx.stroke();
+
+  // triangles du réacteur (façon arc reactor)
+  ctx.save(); ctx.rotate(-spin * .8); ctx.shadowBlur = 20;
+  for (let i = 0; i < 10; i++) {
+    ctx.rotate(Math.PI * 2 / 10);
+    ctx.fillStyle = col(.18 + energy * .25);
+    ctx.beginPath(); ctx.moveTo(R * .2, -R * .035); ctx.lineTo(R * .38, -R * .055); ctx.lineTo(R * .38, R * .055); ctx.lineTo(R * .2, R * .035); ctx.fill();
+  }
+  ctx.restore();
+
+  // cœur
+  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, R * .2);
+  core.addColorStop(0, `rgba(255,255,255,${.85 + energy * .15})`); core.addColorStop(.35, col(.9)); core.addColorStop(1, col(0));
+  ctx.fillStyle = core; ctx.beginPath(); ctx.arc(0, 0, R * (.17 + energy * .03), 0, 7); ctx.fill();
+  ctx.strokeStyle = col(.9); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, R * .2, 0, 7); ctx.stroke();
+
+  // particules en orbite
+  ctx.shadowBlur = 8;
+  particles.forEach(p => {
+    p.a += p.s * (1 + energy * 4);
+    const rr = R * p.r * (1 + Math.sin(t * 2 + p.z * 9) * .02);
+    ctx.fillStyle = col(.25 + p.z * .6);
+    ctx.beginPath(); ctx.arc(Math.cos(p.a) * rr, Math.sin(p.a) * rr, 1 + p.z * 1.6, 0, 7); ctx.fill();
+  });
+  ctx.restore();
+  requestAnimationFrame(draw);
+}
+
+/* ---------- jauges ---------- */
+function gauge(el, value, label, unit = "%", warn = 85) {
+  const v = value == null ? 0 : value, c = 2 * Math.PI * 40, frac = Math.min(v, 100) / 100;
+  const color = v >= warn ? "var(--red)" : "var(--cyan)";
+  el.innerHTML = `<svg viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(60,232,255,.12)" stroke-width="6"/>
+    <circle cx="50" cy="50" r="40" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="butt"
+      stroke-dasharray="${c * frac} ${c}" transform="rotate(-90 50 50)" style="filter:drop-shadow(0 0 4px ${color});transition:stroke-dasharray .6s"/>
+    <circle cx="50" cy="50" r="31" fill="none" stroke="rgba(60,232,255,.25)" stroke-dasharray="2 4"/>
+    <text x="50" y="52" text-anchor="middle" class="v">${value == null ? "—" : Math.round(v) + unit}</text>
+    <text x="50" y="68" text-anchor="middle" class="l">${label}</text></svg>`;
+}
+const fmtBytes = (b) => b > 1e6 ? (b / 1e6).toFixed(1) + " Mo/s" : (b / 1e3).toFixed(0) + " Ko/s";
+const fmtDur = (s) => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h} h ${m} min` : `${m} min ${s % 60} s`; };
+
+function sparkline() {
+  const pts = cpuHist.map((v, i) => `${i / 59 * 260},${46 - v / 100 * 44}`).join(" ");
+  $("spark").innerHTML = `<polyline points="${pts}" fill="none" stroke="var(--cyan)" stroke-width="1.5" style="filter:drop-shadow(0 0 3px var(--cyan))"/>
+    <polyline points="0,46 ${pts} ${(cpuHist.length - 1) / 59 * 260},46" fill="rgba(60,232,255,.08)" stroke="none"/>`;
+}
+
+/* ---------- conversation ---------- */
+function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
+function addMsg(role, text, meta = "") {
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.innerHTML = `<span class="who">${role === "user" ? "VOUS" : "JARVIS"}</span><span class="body">${esc(text)}</span><span class="meta">${meta}</span>`;
+  $("log").appendChild(div); $("log").scrollTop = 1e9;
+  return div;
+}
+function addTool(name, detail) {
+  toolCount++; $("toolcount").textContent = toolCount;
+  const li = document.createElement("li");
+  const ts = new Date().toLocaleTimeString("fr-FR");
+  li.innerHTML = `<span class="ts">${ts}</span><div class="n">${esc(name.toUpperCase())}</div><div class="x">${esc(detail || "")}</div>`;
+  $("feed").prepend(li);
+  while ($("feed").children.length > 60) $("feed").lastChild.remove();
+}
+function setState(s) {
+  state = s; document.body.dataset.state = s;
+  const [a, b] = STATES[s] || [s.toUpperCase(), ""];
+  $("stateTxt").textContent = a; $("stateSub").textContent = b;
+  $("mic").classList.toggle("live", s === "listening");
+}
+
+/* ---------- liaison avec le serveur ---------- */
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { $("link").classList.add("on"); $("linktxt").textContent = "LIAISON ÉTABLIE"; };
+  ws.onclose = () => {
+    $("link").classList.remove("on"); $("linktxt").textContent = "LIAISON PERDUE"; setState("boot");
+    setTimeout(connect, 1500);
+  };
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    switch (m.type) {
+      case "hello":
+        $("log").innerHTML = ""; setState(m.state); voiceOn = m.voice;
+        $("voice").classList.toggle("off", !voiceOn);
+        $("model").textContent = (m.config.model || "").toUpperCase();
+        m.history.forEach(h => {
+          addMsg(h.role, h.text);
+          (h.tools || []).forEach(x => addTool(x.name, x.detail));
+        });
+        break;
+      case "state": setState(m.state); break;
+      case "level": level = m.v; break;
+      case "speaking": speaking = m.on; break;
+      case "voice": voiceOn = m.on; $("voice").classList.toggle("off", !voiceOn); break;
+      case "user": current = null; addMsg("user", m.text, m.source === "voice" ? "🎙" : ""); break;
+      case "delta":
+        if (!current) { current = addMsg("jarvis", ""); current.querySelector(".body").classList.add("caret"); }
+        current.querySelector(".body").textContent += m.text; $("log").scrollTop = 1e9;
+        break;
+      case "tool":
+        addTool(m.name, m.detail);
+        if (!current) { current = addMsg("jarvis", ""); current.querySelector(".body").classList.add("caret"); }
+        break;
+      case "done":
+        if (current) {
+          current.querySelector(".body").classList.remove("caret");
+          current.querySelector(".meta").textContent = m.duration ? `${m.duration} s` : "";
+        }
+        $("last").textContent = m.duration ? `${m.duration} s` : "—";
+        current = null; break;
+      case "stats":
+        gauge($("g-cpu"), m.cpu, "CPU"); gauge($("g-mem"), m.mem, "MÉMOIRE");
+        gauge($("g-disk"), m.disk, "DISQUE", "%", 90);
+        gauge($("g-bat"), m.battery, m.plugged ? "SECTEUR" : "BATTERIE", "%", 101);
+        $("down").textContent = fmtBytes(m.down); $("up").textContent = fmtBytes(m.up);
+        $("uptime").textContent = fmtDur(m.uptime); $("turns").textContent = m.turns;
+        cpuHist.push(m.cpu); if (cpuHist.length > 60) cpuHist.shift(); sparkline();
+        break;
+    }
+  };
+}
+const send = (o) => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.value.trim()) { send({ type: "text", text: e.target.value.trim() }); e.target.value = ""; }
+  if (e.key === "Escape") e.target.blur();
+});
+$("mic").onclick = () => send({ type: "listen" });
+$("stop").onclick = () => send({ type: "stop" });
+$("reset").onclick = () => send({ type: "reset" });
+$("voice").onclick = () => send({ type: "voice", on: !voiceOn });
+addEventListener("keydown", (e) => {
+  if (document.activeElement === $("input")) return;
+  if (e.code === "Space") { e.preventDefault(); send({ type: "listen" }); }
+  if (e.key === "Escape") send({ type: "stop" });
+  if (e.key.length === 1 && /\w/.test(e.key) && !e.metaKey && !e.ctrlKey) $("input").focus();
+});
+
+function tick() {
+  const d = new Date();
+  $("time").textContent = d.toLocaleTimeString("fr-FR");
+  $("date").textContent = d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+setInterval(tick, 1000); tick();
+["g-cpu", "g-mem", "g-disk", "g-bat"].forEach((id, i) => gauge($(id), null, ["CPU", "MÉMOIRE", "DISQUE", "BATTERIE"][i]));
+resize(); draw(); connect();
+</script>
+</body>
+</html>

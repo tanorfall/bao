@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>BAO</string>
+  <key>CFBundleDisplayName</key>
+  <string>BAO</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.jarvis.assistant</string>
+  <key>CFBundleExecutable</key>
+  <string>BAO</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>BAO écoute son mot d'appel et tes demandes vocales.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>BAO travaille sur tes projets dans Documents.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>BAO peut ranger et créer des fichiers sur ton Bureau.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>BAO peut retrouver tes téléchargements.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>BAO pilote tes applications à ta demande.</string>
+</dict>
+</plist>

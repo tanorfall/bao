@@ -1,0 +1,94 @@
+#!/bin/zsh
+# Commande de contrôle de Jarvis.
+ROOT="${0:A:h:h}"
+LABEL="com.jarvis.assistant"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export HF_HUB_DISABLE_XET=1
+cd "$ROOT"
+PORT=$(python3 -c "import json;print(json.load(open('config.json')).get('port',7777))" 2>/dev/null || echo 7777)
+
+case "$1" in
+  setup)      # vérifie le Mac, installe les dépendances et télécharge le modèle vocal (une seule fois)
+    [[ "$(uname -m)" == "arm64" ]] || { echo "BAO demande un Mac Apple Silicon (M1 ou plus)."; exit 1; }
+    (( $(sw_vers -productVersion | cut -d. -f1) >= 26 )) || { echo "BAO demande macOS 26 ou plus (verre liquide)."; exit 1; }
+    xcode-select -p >/dev/null 2>&1 || { echo "Installe d'abord les outils Apple : xcode-select --install"; exit 1; }
+    command -v uv >/dev/null || { echo "Installe uv : curl -LsSf https://astral.sh/uv/install.sh | sh  (puis rouvre le terminal)"; exit 1; }
+    command -v claude >/dev/null || [[ -x "$HOME/.local/bin/claude" ]] || { echo "Installe Claude Code : curl -fsSL https://claude.ai/install.sh | bash  puis lance « claude » une fois et connecte ton abonnement."; exit 1; }
+    uv sync || exit 1
+    echo "Téléchargement du modèle vocal (≈ 1,6 Go, une seule fois)…"
+    "$ROOT/.venv/bin/python" -c "from huggingface_hub import snapshot_download as s; s('mlx-community/whisper-large-v3-turbo')" || exit 1
+    echo "Tout est prêt. Lance : bin/jarvis start" ;;
+  run)        # premier plan (utilisé par launchd)
+    exec "$ROOT/.venv/bin/python" -m jarvis.server ;;
+  start)
+    if [[ ! -d "$HOME/Applications/BAO.app" || ! -f "$PLIST" ]]; then "$0" install
+    elif ! launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1; then launchctl bootstrap "gui/$UID" "$PLIST"
+    else launchctl kickstart "gui/$UID/$LABEL"; fi
+    echo "Jarvis démarre… HUD : http://localhost:$PORT" ;;
+  stop)
+    launchctl bootout "gui/$UID/$LABEL" 2>/dev/null
+    pkill -f "jarvis.server" && echo "Jarvis arrêté." || echo "Jarvis ne tournait pas." ;;
+  restart)    # launchd le relance tout seul (KeepAlive)
+    pkill -f "jarvis.server"; echo "Jarvis redémarre dans quelques secondes…" ;;
+  app)        # construit ~/Applications/BAO.app (c'est elle que macOS autorise : micro, Documents)
+    # Une vraie app : macOS ne donne micro et Documents qu'à une app identifiée
+    APP="$HOME/Applications/BAO.app"
+    rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
+    cp "$ROOT/launchd/Info.plist" "$APP/Contents/Info.plist"
+    plutil -replace BAORoot -string "$ROOT" "$APP/Contents/Info.plist"
+    swiftc -O -o "$APP/Contents/MacOS/BAO" "$ROOT/launchd/launcher.swift" || { echo "Compilation du lanceur impossible."; exit 1; }
+    codesign --force --deep -s - "$APP" 2>/dev/null
+    echo "BAO.app prête dans ~/Applications." ;;
+  install)    # lancement automatique à l'ouverture de session + relance en cas de crash
+    "$0" app || exit 1
+    mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/logs"
+    sed -e "s#__ROOT__#$ROOT#g" -e "s#__HOME__#$HOME#g" "$ROOT/launchd/$LABEL.plist" > "$PLIST"
+    launchctl bootout "gui/$UID/$LABEL" 2>/dev/null
+    launchctl bootstrap "gui/$UID" "$PLIST" && echo "Jarvis installé : il démarre avec ta session et se relance tout seul." ;;
+  uninstall)
+    launchctl bootout "gui/$UID/$LABEL" 2>/dev/null; rm -f "$PLIST"; echo "Démarrage automatique retiré." ;;
+  status)
+    curl -s "http://127.0.0.1:$PORT/api/status" && echo || echo "Hors ligne." ;;
+  hud)
+    open -na "Google Chrome" --args --app="http://localhost:$PORT" --window-size=1440,900 2>/dev/null || open "http://localhost:$PORT" ;;
+  logs)
+    tail -f "$ROOT/logs/jarvis.log" ;;
+  listen)
+    curl -s -X POST "http://127.0.0.1:$PORT/api/listen" >/dev/null ;;
+  chat)
+    shift; exec "$ROOT/.venv/bin/python" -m jarvis.cli "$@" ;;
+  ask)
+    shift; exec "$ROOT/.venv/bin/python" -m jarvis.cli "$@" ;;
+  config)
+    open -t "$ROOT/config.json" ;;
+  micros)     # liste les micros ; mets le nom (ou le numéro) dans config.json → "input_device"
+    "$ROOT/.venv/bin/python" -c "
+import sounddevice as sd
+d = sd.default.device[0]
+for i, x in enumerate(sd.query_devices()):
+    if x['max_input_channels'] > 0: print(('▶' if i == d else ' '), i, x['name'])
+print('\\nUn micro proche de la bouche (casque, AirPods) comprend bien mieux que celui du Mac.')" 2>/dev/null ;;
+  memoire|memory)   # ce que BAO a appris : fichiers lisibles et modifiables
+    mkdir -p "$ROOT/data/memory"; open "$ROOT/data/memory" ;;
+  *)
+    cat <<EOF
+JARVIS — commandes :
+  jarvis setup      (une fois) vérifie le Mac, installe tout, télécharge le modèle vocal
+  jarvis start      démarre (et installe le lancement automatique au premier coup)
+  jarvis stop       arrête
+  jarvis restart    redémarre (après un changement de config.json)
+  jarvis status     état
+  jarvis hud        ouvre l'interface
+  jarvis chat       discuter au clavier dans le terminal
+  jarvis ask "..."  une demande rapide (--silent pour ne pas parler)
+  jarvis listen     déclenche l'écoute (à lier à un raccourci clavier)
+  jarvis logs       journal en direct
+  jarvis config     ouvre la configuration
+  jarvis micros     liste les micros (un micro proche de la bouche améliore beaucoup la compréhension)
+  jarvis memoire    ouvre la mémoire de BAO (profil, préférences, leçons, savoir-faire)
+  jarvis run        lance au premier plan (débogage)
+  jarvis uninstall  retire le lancement automatique
+EOF
+  ;;
+esac
